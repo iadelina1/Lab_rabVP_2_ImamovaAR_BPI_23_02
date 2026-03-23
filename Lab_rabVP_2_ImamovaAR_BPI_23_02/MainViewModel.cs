@@ -13,12 +13,14 @@ namespace Lab_rabVP_2_ImamovaAR_BPI_23_02
         private CancellationTokenSource _cts = new();
 
         [ObservableProperty] private int _arraySize = 1000;
+        [ObservableProperty] private int _maxThreads = 2;
+        [ObservableProperty] private bool _useSharedArray = false;
+
         [ObservableProperty] private string _originalArrayString = "Массив не сгенерирован";
         [ObservableProperty] private string _bubbleSortResult = "Ожидание...";
         [ObservableProperty] private string _quickSortResult = "Ожидание...";
         [ObservableProperty] private string _insertionSortResult = "Ожидание...";
         [ObservableProperty] private string _shakerSortResult = "Ожидание...";
-
         [ObservableProperty] private string _totalComparisons = "Общее число сравнений: 0";
 
         [ObservableProperty] private double _bubbleProgress;
@@ -30,11 +32,10 @@ namespace Lab_rabVP_2_ImamovaAR_BPI_23_02
         {
             _sorter = new ArraySorter();
             _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
-
-            _sorter.BubbleSortCompleted += OnBubbleSortCompleted;
-            _sorter.QuickSortCompleted += OnQuickSortCompleted;
-            _sorter.InsertionSortCompleted += OnInsertionSortCompleted;
-            _sorter.ShakerSortCompleted += OnShakerSortCompleted;
+            _sorter.BubbleSortCompleted += (arr, c, ms) => UpdateUI("Bubble", ms);
+            _sorter.QuickSortCompleted += (arr, c, ms) => UpdateUI("Quick", ms);
+            _sorter.InsertionSortCompleted += (arr, c, ms) => UpdateUI("Insertion", ms);
+            _sorter.ShakerSortCompleted += (arr, c, ms) => UpdateUI("Shaker", ms);
             _sorter.ProgressChanged += OnProgressChanged;
         }
 
@@ -42,120 +43,83 @@ namespace Lab_rabVP_2_ImamovaAR_BPI_23_02
         private void GenerateArray()
         {
             _originalArray = _sorter.GenerateRandomArray(ArraySize);
-            OriginalArrayString = $"Сгенерирован массив на {ArraySize} эл.";
-
-            BubbleSortResult = QuickSortResult = InsertionSortResult = ShakerSortResult = "Готов к работе";
+            OriginalArrayString = $"Сгенерирован массив ({ArraySize} эл.)";
+            BubbleSortResult = QuickSortResult = InsertionSortResult = ShakerSortResult = "Готов";
             BubbleProgress = QuickProgress = InsertionProgress = ShakerProgress = 0;
-
             NotifyCommands();
         }
 
         [RelayCommand]
-        private void CancelAll()
+        private void CancelAll() { _cts.Cancel(); _cts = new CancellationTokenSource(); NotifyCommands(); }
+
+        [RelayCommand]
+        private void ResetAll()
         {
-            _cts.Cancel();
-            _cts = new CancellationTokenSource();
-
-            if (BubbleSortResult == "Сортируется...") BubbleSortResult = "Отменено";
-            if (QuickSortResult == "Сортируется...") QuickSortResult = "Отменено";
-            if (InsertionSortResult == "Сортируется...") InsertionSortResult = "Отменено";
-            if (ShakerSortResult == "Сортируется...") ShakerSortResult = "Отменено";
-
-            NotifyCommands();
+            CancelAll(); _originalArray = null; _sorter.ResetTotal();
+            BubbleSortResult = QuickSortResult = InsertionSortResult = ShakerSortResult = "Ожидание...";
+            BubbleProgress = QuickProgress = InsertionProgress = ShakerProgress = 0;
+            UpdateTotal(); NotifyCommands();
         }
 
         private bool CanSort() => _originalArray != null;
 
         [RelayCommand(CanExecute = nameof(CanSort))]
-        private void BubbleSort()
-        {
-            BubbleSortResult = "Сортируется...";
-            BubbleProgress = 0;
-            BubbleSortCommand.NotifyCanExecuteChanged();
-            new Thread(() => _sorter.BubbleSort(_originalArray!, _cts.Token)) { IsBackground = true }.Start();
-        }
+        private void RunBubble() => StartSort(() => _sorter.BubbleSort(_originalArray!, _cts.Token, UseSharedArray), "Bubble");
 
         [RelayCommand(CanExecute = nameof(CanSort))]
-        private void QuickSort()
-        {
-            QuickSortResult = "Сортируется...";
-            QuickProgress = 0;
-            QuickSortCommand.NotifyCanExecuteChanged();
-            new Thread(() => _sorter.QuickSort(_originalArray!, _cts.Token)) { IsBackground = true }.Start();
-        }
+        private void RunQuick() => StartSort(() => _sorter.QuickSort(_originalArray!, _cts.Token, UseSharedArray), "Quick");
 
         [RelayCommand(CanExecute = nameof(CanSort))]
-        private void InsertionSort()
-        {
-            InsertionSortResult = "Сортируется...";
-            InsertionProgress = 0;
-            InsertionSortCommand.NotifyCanExecuteChanged();
-            new Thread(() => _sorter.InsertionSort(_originalArray!, _cts.Token)) { IsBackground = true }.Start();
-        }
+        private void RunInsertion() => StartSort(() => _sorter.InsertionSort(_originalArray!, _cts.Token, UseSharedArray), "Insertion");
 
         [RelayCommand(CanExecute = nameof(CanSort))]
-        private void ShakerSort()
+        private void RunShaker() => StartSort(() => _sorter.ShakerSort(_originalArray!, _cts.Token, UseSharedArray), "Shaker");
+
+        [RelayCommand(CanExecute = nameof(CanSort))]
+        private void RunAll()
         {
-            ShakerSortResult = "Сортируется...";
-            ShakerProgress = 0;
-            ShakerSortCommand.NotifyCanExecuteChanged();
-            new Thread(() => _sorter.ShakerSort(_originalArray!, _cts.Token)) { IsBackground = true }.Start();
+            RunBubble();
+            RunQuick();
+            RunInsertion();
+            RunShaker();
         }
 
-        [RelayCommand]
-        private void ResetAll()
+        private void StartSort(Action action, string alg)
         {
-            _cts.Cancel();
-            _cts = new CancellationTokenSource();
-            _originalArray = null;
-            _sorter.ResetTotal();
+            _sorter.UpdateThreadLimit(MaxThreads);
+            SetStatus(alg, "Работает...");
+            new Thread(() => action()) { IsBackground = true }.Start();
+        }
 
-            ArraySize = 1000;
-            OriginalArrayString = "Массив не сгенерирован";
-            BubbleSortResult = QuickSortResult = InsertionSortResult = ShakerSortResult = "Ожидание...";
+        private void OnProgressChanged(string alg, double val) => _uiContext.Post(_ => {
+            if (alg == "Bubble") BubbleProgress = val;
+            else if (alg == "Quick") QuickProgress = val;
+            else if (alg == "Insertion") InsertionProgress = val;
+            else if (alg == "Shaker") ShakerProgress = val;
+        }, null);
 
-            BubbleProgress = QuickProgress = InsertionProgress = ShakerProgress = 0;
-
+        private void UpdateUI(string alg, double ms) => _uiContext.Post(_ => {
+            SetStatus(alg, $"{ms:F2} мс");
             UpdateTotal();
+        }, null);
 
-            NotifyCommands();
-        }
+        private void UpdateTotal() => TotalComparisons = $"Общее число сравнений: {_sorter.TotalComparisons}";
 
-        private void OnProgressChanged(string algorithm, double value)
+        private void SetStatus(string alg, string status)
         {
-            _uiContext.Post(_ =>
-            {
-                switch (algorithm)
-                {
-                    case "Bubble": BubbleProgress = value; break;
-                    case "Quick": QuickProgress = value; break;
-                    case "Insertion": InsertionProgress = value; break;
-                    case "Shaker": ShakerProgress = value; break;
-                }
-            }, null);
+            if (alg == "Bubble") BubbleSortResult = status;
+            else if (alg == "Quick") QuickSortResult = status;
+            else if (alg == "Insertion") InsertionSortResult = status;
+            else if (alg == "Shaker") ShakerSortResult = status;
         }
-
-        private void OnBubbleSortCompleted(int[] arr, long comps, double ms) =>
-            _uiContext.Post(_ => { BubbleSortResult = $"Рез: {ms:F2} мс"; UpdateTotal(); BubbleSortCommand.NotifyCanExecuteChanged(); }, null);
-
-        private void OnQuickSortCompleted(int[] arr, long comps, double ms) =>
-            _uiContext.Post(_ => { QuickSortResult = $"Рез: {ms:F2} мс"; UpdateTotal(); QuickSortCommand.NotifyCanExecuteChanged(); }, null);
-
-        private void OnInsertionSortCompleted(int[] arr, long comps, double ms) =>
-            _uiContext.Post(_ => { InsertionSortResult = $"Рез: {ms:F2} мс"; UpdateTotal(); InsertionSortCommand.NotifyCanExecuteChanged(); }, null);
-
-        private void OnShakerSortCompleted(int[] arr, long comps, double ms) =>
-            _uiContext.Post(_ => { ShakerSortResult = $"Рез: {ms:F2} мс"; UpdateTotal(); ShakerSortCommand.NotifyCanExecuteChanged(); }, null);
-
-        private void UpdateTotal() =>
-            TotalComparisons = $"Общее число сравнений: {_sorter.TotalComparisons}";
 
         private void NotifyCommands()
         {
-            BubbleSortCommand.NotifyCanExecuteChanged();
-            QuickSortCommand.NotifyCanExecuteChanged();
-            InsertionSortCommand.NotifyCanExecuteChanged();
-            ShakerSortCommand.NotifyCanExecuteChanged();
+            RunBubbleCommand.NotifyCanExecuteChanged();
+            RunQuickCommand.NotifyCanExecuteChanged();
+            RunInsertionCommand.NotifyCanExecuteChanged();
+            RunShakerCommand.NotifyCanExecuteChanged();
+            RunAllCommand.NotifyCanExecuteChanged();
         }
     }
 }
